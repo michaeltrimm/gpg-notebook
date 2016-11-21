@@ -1,0 +1,15 @@
+---
+# file: vagrant-hosts.yaml
+# VM config file for the Vagrant development environment
+
+hosts:
+  gpg-notebook-dev:
+    memory: 2048
+    numvcpus: 2
+    box: ubuntu/trusty64
+    private_networks:
+      - private_ip: 10.0.99.1
+    synced_folders:
+      - host_path: './'
+        guest_path: '/vagrant'
+        disabled: false
