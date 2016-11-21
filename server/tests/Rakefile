@@ -1,0 +1,144 @@
+require 'rake'
+require 'rspec/core/rake_task'
+require 'docker'
+require 'yaml'
+
+Docker.validate_version!
+
+task :test, [:names] => ['test:build_tasks', 'test:main']
+task :default => :test
+
+namespace :test do
+
+    def get_namespace()
+        # The namespace to use when looking for docker images
+        return @namespace if @namespace
+        @namespace = ENV['NAMESPACE'] || (fail "NAMESPACE environment variable is required.")
+    end
+
+    def get_tag()
+        # The tag to use when looking for docker images
+        return @tag if @tag
+        @tag = ENV['TAG'] || (fail "TAG environment variable is required.")
+    end
+
+    def get_config()
+        # Load the yaml config that maps image names to the roles to test for
+        return @config if @config
+        @config = YAML.load_file(ENV['CONFIG_FILE'] || 'container-roles.yaml')
+    end
+
+    def get_expected_images()
+        # Image names are used to check for missing images in docker. If ALLOW_MISSING
+        # is not specified and any images are missing then we will fail immediately
+        return @expected_images if @expected_images
+        config = get_config()
+        @expected_iamges = config.keys
+    end
+
+    def allow_missing()
+        # Override to skip failing if expected images are missing
+        return ENV['ALLOW_MISSING'] == '1'
+    end
+
+    def get_docker_images(namespace, tag)
+        images = {}
+        Docker::Image.all().each do |i|
+            i.info['RepoTags'].each do |img_name|
+                img_split = img_name.split('/')
+                if img_split[-2] != namespace
+                    next
+                end
+                if img_split[-1].split(':')[1] != tag
+                    next
+                end
+                name = img_split[-1].split(':')[0]
+                images[name] = i.info['id']
+            end
+        end
+
+        if images.length == 0
+            fail("No images found matching namespace '#{namespace}' and tag '#{tag}'")
+        end
+
+        return images
+    end
+
+    def get_tasks(names)
+        namespace = get_namespace()
+        tag = get_tag()
+        images = get_docker_images(namespace, tag)
+
+        if !names.nil?
+            missing = names - images.keys()
+            if missing.length > 0
+                fail "The following provided images are not available in Docker: #{missing.join(', ')}"
+            end
+            images = names
+        end
+
+        config = get_config()
+
+        tasks = []
+        images.each do |name, id|
+            if !(config.has_key? name)
+                fail "Image #{name} has no mapped roles. Please define " \
+                    "them in the roles yaml file."
+            end
+            tasks << name
+        end
+
+        if !allow_missing() and names.nil?
+            missing_images = []
+            get_expected_images().each do |s|
+                if !(tasks.include? s)
+                    missing_images << s
+                end
+            end
+
+            if missing_images.length > 0
+                fail "Missing the following images: #{missing_images}"
+            end
+        end
+
+        return tasks
+    end
+
+    def get_roles_for_image(image_name)
+        config = get_config()
+        return config[image_name]
+    end
+
+    def build_tasks()
+        namespace = get_namespace()
+        tag = get_tag()
+        images = get_docker_images(namespace, tag)
+
+        images.each do |name, id|
+            RSpec::Core::RakeTask.new(name) do |task|
+                ENV['DOCKER_IMAGE_NAME'] = name
+                ENV['DOCKER_IMAGE_ID'] = id
+
+                roles = get_roles_for_image(name)
+                task.pattern = 'spec/{' + roles.join(',') + '}/*_spec.rb'
+            end
+        end
+    end
+
+    task :build_tasks do
+        build_tasks()
+    end
+
+    # NOTE: the :names argument must match the default task argument at the top
+    task :main, :names do |t, args|
+        names = args[:names]
+        if !names.nil?
+            names = names.split(' ')
+        end
+
+        tasks = get_tasks(names)
+        tasks.each do |t|
+            Rake::Task[t].invoke
+        end
+    end
+end
