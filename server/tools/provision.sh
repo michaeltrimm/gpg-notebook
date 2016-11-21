@@ -18,6 +18,8 @@ CYAN='\033[0;36m'
 GRAY='\033[0;37m'
 NC='\033[0m'
 
+NOW=$(date '+%Y%m%d@%H%M%S');
+
 set -o errexit
 
 # Script requires root for access to /etc/hosts
@@ -27,42 +29,98 @@ if [ "$EUID" -ne 0 ]
 fi
 
 function update_apt {
-  DEBIAN_FRONTEND="noninteractive" apt-get update
-  DEBIAN_FRONTEND="noninteractive" apt-get upgrade -y
+  printf "Updating apt-get..."
+  DEBIAN_FRONTEND="noninteractive" apt-get update 2> provision_${NOW}.log
+  printf "${GREEN}✓${NC}\n"
+  
+  printf "Upgrading system packages..."
+  DEBIAN_FRONTEND="noninteractive" apt-get upgrade -y 2> provision_${NOW}.log
+  printf "${GREEN}✓${NC}\n"
 }
 
 function install_deps {
-  DEBIAN_FRONTEND="noninteractive" apt-get install apt-transport-https ca-certificates -y
-  apt-key adv --keyserver hkp://ha.pool.sks-keyservers.net:80 --recv-keys 58118E89F3A912897C070AD
+  printf "Installing ${BLUE}apt-transport-https${NC} and ${BLUE}ca-certificates${NC}..."
+  DEBIAN_FRONTEND="noninteractive" apt-get install apt-transport-https ca-certificates -y 2> provision_${NOW}.log
+  printf "${GREEN}✓${NC}\n"
+  
+  printf "Installing Docker's signing key..."
+  apt-key adv --keyserver hkp://ha.pool.sks-keyservers.net:80 --recv-keys 58118E89F3A912897C070AD 2> provision_${NOW}.log
+  printf "${GREEN}✓${NC}\n"
 }
 
 function install_docker {
-  DEBIAN_FRONTEND="noninteractive" apt-get install linux-image-extra-$(uname -r) linux-image-extra-virtual
-  groupadd docker
-  usermod -aG docker vagrant
-
-  DEBIAN_FRONTEND="noninteractive" apt-get install docker-engine
+  printf "Installing docker dependencies..."
+  DEBIAN_FRONTEND="noninteractive" apt-get install linux-image-extra-$(uname -r) linux-image-extra-virtual 2> provision_${NOW}.log
+  printf "${GREEN}✓${NC}\n"
   
-  systemctl enable docker
-  service docker start
+  printf "Creating new user group ${BLUE}docker${NC}..."
+  groupadd docker 2> provision_${NOW}.log
+  printf "${GREEN}✓${NC}\n"
+  
+  printf "Adding ${BLUE}vagrant${NC} user to the ${BLUE}docker${NC} group..."
+  usermod -aG docker vagrant 2> provision_${NOW}.log
+  printf "${GREEN}✓${NC}\n"
+
+  printf "Installing the core ${RED}docker-engine${NC}..."
+  DEBIAN_FRONTEND="noninteractive" apt-get install docker-engine 2> provision_${NOW}.log
+  printf "${GREEN}✓${NC}\n"
+  
+  printf "Configuring ${RED}docker${NC} to start on system boot..."
+  systemctl enable docker 2> provision_${NOW}.log
+  printf "${GREEN}✓${NC}\n"
+  
+  printf "Starting ${RED}docker${NC} service..."
+  service docker start 2> provision_${NOW}.log
+  printf "${GREEN}✓${NC}\n"
 }
 
 function protect_system {
+  printf "Installing ${BLUE}fail2ban${NC}..."
+  DEBIAN_FRONTEND="noninteractive" apt-get install fail2ban -y 2> provision_${NOW}.log
+  printf "${GREEN}✓${NC}\n"
   
+  printf "Configuring ${BLUE}fail2ban${NC} to start on system boot..."
+  systemctl enable fail2ban 2> provision_${NOW}.log
+  printf "${GREEN}✓${NC}\n"
   
+  printf "Starting ${BLUE}fail2ban${NC} service..."
+  service fail2ban start 2> provision_${NOW}.log
+  printf "${GREEN}✓${NC}\n"
   
-  DEBIAN_FRONTEND="noninteractive" apt-get install fail2ban -y
-  systemctl enable fail2ban
-  service fail2ban start
+  printf "Updating ${BLUE}VIM${NC}..."
+  DEBIAN_FRONTEND="noninteractive" apt-get install vim -y 2> provision_${NOW}.log
+  printf "${GREEN}✓${NC}\n"
   
-  DEBIAN_FRONTEND="noninteractive" apt-get install vim -y
-  DEBIAN_FRONTEND="noninteractive" apt-get install logrotate -y
-  systemctl enable logrotate
-  service start logrotate
+  printf "Installing ${BLUE}logrotate${NC}"
+  DEBIAN_FRONTEND="noninteractive" apt-get install logrotate -y 2> provision_${NOW}.log
+  printf "${GREEN}✓${NC}\n"
   
-  ufw enable
-  ufw default deny incoming
-  ufw default allow outgoing
+  printf "Configuring ${BLUE}logrotate${NC} to start on system boot..."
+  systemctl enable logrotate 2> provision_${NOW}.log
+  printf "${GREEN}✓${NC}\n"
+  
+  printf "Starting ${BLUE}logrotate${NC} service"
+  service start logrotate 2> provision_${NOW}.log
+  printf "${GREEN}✓${NC}\n"
+  
+  printf "Enabling ${BLUE}UFW${NC} firewall service..."
+  ufw enable 2> provision_${NOW}.log
+  printf "${GREEN}✓${NC}\n"
+  
+  printf "Setting firewall policy to deny all incoming connections by default..."
+  ufw default deny incoming 2> provision_${NOW}.log
+  printf "${GREEN}✓${NC}\n"
+  
+  printf "Setting firewall policy to allow all outgoing connections by default..."
+  ufw default allow outgoing 2> provision_${NOW}.log
+  printf "${GREEN}✓${NC}\n"
+}
+
+function install {
+  update_apt
+  install_deps
+  install_docker
+  protect_system
 }
 
 function readme {
@@ -108,14 +166,6 @@ do
 case $i in
     --install)
     install
-    shift
-    ;;
-    --undo)
-    undo
-    shift
-    ;;
-    --uninstall)
-    uninstall
     shift
     ;;
     -h|--help)
