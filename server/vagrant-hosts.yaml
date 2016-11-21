@@ -13,3 +13,6 @@ hosts:
       - host_path: './'
         guest_path: '/vagrant'
         disabled: false
+      - host_path: '../gpg-notebook'
+        guest_path: '/var/gpg-notebook'
+        disabled: false
